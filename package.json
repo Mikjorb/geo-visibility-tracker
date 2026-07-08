@@ -1,0 +1,30 @@
+{
+  "name": "geo-visibility-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted GEO/AEO tracker: measure your brand's visibility in LLM answers (Gemini, OpenAI, Perplexity)",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "db:setup": "node scripts/db-setup.mjs",
+    "mcp": "node mcp/server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "next": "^16.2.9",
+    "pg": "^8.13.1",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "recharts": "^2.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "@types/react": "19.1.1",
+    "@types/react-dom": "19.1.1",
+    "typescript": "^5.7.0"
+  }
+}
