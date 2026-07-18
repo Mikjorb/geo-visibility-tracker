@@ -169,6 +169,31 @@ export function averagePosition(allRows: MentionRow[]): number | null {
   return round1(ranks.reduce((a, b) => a + b, 0) / ranks.length);
 }
 
+// Sentimiento de marca (percepción) — tarea LLM-as-judge: Claude puntúa 1-5
+// cómo se percibe la marca propia en cada respuesta que la menciona
+// (1 muy negativo … 5 muy positivo/líder). Aquí solo agregamos esos valores.
+// score 0-100 = (media-1)/4*100 (1→0, 3→50, 5→100). Reparto: pos 4-5, neutral 3, neg 1-2.
+// Devuelve score:null si no hay ninguna mención analizada (no mostrar 0% engañoso).
+export function sentimentSummary(sentiments: (number | null)[]): {
+  score: number | null;
+  positive: number;
+  neutral: number;
+  negative: number;
+  analyzed: number;
+} {
+  const vals = sentiments.filter((s): s is number => s != null);
+  if (vals.length === 0)
+    return { score: null, positive: 0, neutral: 0, negative: 0, analyzed: 0 };
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return {
+    score: Math.round(((avg - 1) / 4) * 100),
+    positive: vals.filter((s) => s >= 4).length,
+    neutral: vals.filter((s) => s === 3).length,
+    negative: vals.filter((s) => s <= 2).length,
+    analyzed: vals.length,
+  };
+}
+
 // AI Visibility Score (escala 0-1000) — fórmula propia y transparente:
 // premia frecuencia Y posición. Por cada respuesta donde apareces en rank p
 // sumas 1/p; se divide por el total de respuestas y se escala a 1000.

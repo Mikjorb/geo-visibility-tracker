@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS mentions (
   first_position   INTEGER,  -- índice del carácter de la 1ª aparición
   rank             INTEGER,  -- 1 = primera marca citada en la respuesta (NULL si no aparece)
   source           TEXT NOT NULL DEFAULT 'regex',  -- regex | claude (cómo se detectó)
+  sentiment        INTEGER,  -- 1..5 (NULL = sin analizar). Solo la marca propia, cuando mentioned=true. Lo escribe Claude en sesión.
+  sentiment_reason TEXT,     -- justificación breve del juicio de sentimiento (Claude)
   UNIQUE (response_id, brand_id)
 );
 
@@ -146,6 +148,10 @@ CREATE TABLE IF NOT EXISTS geo_audits (
   notes            TEXT,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migración de bases existentes (CREATE TABLE IF NOT EXISTS no altera tablas ya creadas).
+ALTER TABLE mentions ADD COLUMN IF NOT EXISTS sentiment INTEGER;
+ALTER TABLE mentions ADD COLUMN IF NOT EXISTS sentiment_reason TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_responses_run ON responses(run_id);
 CREATE INDEX IF NOT EXISTS idx_recommendations_run ON recommendations(run_id);

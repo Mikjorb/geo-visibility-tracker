@@ -52,12 +52,28 @@ async function resolveRunId(runId) {
 // Filas de menciones (todas las marcas) de un run, agrupadas por respuesta.
 async function mentionRows(runId) {
   return q(
-    `SELECT mt.response_id, b.name AS brand_name, b.is_own, mt.mentioned, mt.rank
+    `SELECT mt.response_id, b.name AS brand_name, b.is_own, mt.mentioned, mt.rank, mt.sentiment
      FROM mentions mt JOIN responses resp ON resp.id = mt.response_id
      JOIN brands b ON b.id = mt.brand_id
      WHERE resp.run_id = $1 AND resp.error IS NULL`,
     [runId]
   );
+}
+
+// Resumen de sentimiento de la marca propia (refleja sentimentSummary de lib/analyze.ts).
+// score 0-100 = (media-1)/4*100. pos 4-5, neutral 3, neg 1-2. score:null si no hay datos.
+function sentimentSummary(sentiments) {
+  const vals = sentiments.filter((s) => s != null);
+  if (vals.length === 0)
+    return { score: null, positive: 0, neutral: 0, negative: 0, analyzed: 0 };
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return {
+    score: Math.round(((avg - 1) / 4) * 100),
+    positive: vals.filter((s) => s >= 4).length,
+    neutral: vals.filter((s) => s === 3).length,
+    negative: vals.filter((s) => s <= 2).length,
+    analyzed: vals.length,
+  };
 }
 
 async function getVisibility(runId) {
@@ -81,6 +97,9 @@ async function getVisibility(runId) {
     [runId]
   );
   const cites = Number(ownCites[0]?.n ?? 0);
+  const ownSentiments = rows
+    .filter((r) => r.is_own && r.mentioned)
+    .map((r) => r.sentiment);
   return {
     runId,
     responses: total,
@@ -88,6 +107,8 @@ async function getVisibility(runId) {
     citationRate: total ? round1((cites / total) * 100) : 0,
     aiVisibilityScore: total ? Math.round((vis / total) * 1000) : 0,
     averagePosition: ranks.length ? round1(ranks.reduce((a, b) => a + b, 0) / ranks.length) : null,
+    sentiment: sentimentSummary(ownSentiments),
+    sentimentPending: ownSentiments.filter((s) => s == null).length,
   };
 }
 
@@ -158,7 +179,7 @@ async function listRuns() {
 
 // --- Definición de herramientas MCP ---
 const TOOLS = [
-  { name: "get_visibility", description: "Métricas de visibilidad de la marca propia en la última ejecución (o runId): Mention Rate, Citation Rate, AI Visibility Score, posición media.", handler: (a) => getVisibility(a.runId) },
+  { name: "get_visibility", description: "Métricas de visibilidad de la marca propia en la última ejecución (o runId): Mention Rate, Citation Rate, AI Visibility Score, posición media y sentimiento de marca (score 0-100 + reparto pos/neutral/neg).", handler: (a) => getVisibility(a.runId) },
   { name: "get_share_of_voice", description: "Share of Voice: ranking de menciones de tu marca frente a competidores en la última ejecución (o runId).", handler: (a) => getShareOfVoice(a.runId) },
   { name: "get_recommendations", description: "Lista de recomendaciones GEO (tareas para ganar visibilidad en IA) de la última ejecución (o runId).", handler: (a) => getRecommendations(a.runId) },
   { name: "get_entities", description: "Grafo de marcas: todas las entidades de marca detectadas en las respuestas de la última ejecución (o runId).", handler: (a) => getEntities(a.runId) },
