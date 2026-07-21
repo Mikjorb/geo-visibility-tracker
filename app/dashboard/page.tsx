@@ -47,7 +47,9 @@ interface Sentiment {
 }
 interface DashboardData {
   history: {
+    runId: number;
     date: string;
+    panelFingerprint: string | null;
     mentionRate: number;
     aiVisibilityScore: number;
     sentimentScore: number | null;
@@ -60,6 +62,7 @@ interface DashboardData {
     aiVisibilityScore: number;
     averagePosition: number | null;
     citations: number;
+    citationEligibleResponses: number;
     citationRate: number;
     sentiment: Sentiment;
     sentimentPending: number;
@@ -122,6 +125,9 @@ export default function Dashboard() {
   }
 
   const l = data?.latest;
+  const historyComparable = !!data && data.history.length > 0 &&
+    data.history.every((h) => h.panelFingerprint) &&
+    new Set(data.history.map((h) => h.panelFingerprint)).size === 1;
 
   return (
     <>
@@ -148,7 +154,7 @@ export default function Dashboard() {
           <h2 style={{ marginBottom: 0 }}>GEO Readiness</h2>
           <p className="subtitle" style={{ marginTop: -8 }}>
             Salud técnica de cara a crawlers de IA y citabilidad (auditoría seo-geo). Explica el
-            "por qué" detrás de las métricas de visibilidad.
+            &quot;por qué&quot; detrás de las métricas de visibilidad.
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16 }}>
             {geoAudits.map((audit) => (
@@ -171,11 +177,11 @@ export default function Dashboard() {
           <div className="cards" style={{ marginTop: 16 }}>
             <Card label="AI Visibility Score" value={`${l.aiVisibilityScore}`} hint="escala 0–1000" />
             <Card label="Mention Rate" value={`${l.mentionRate}%`} hint={`${l.brandMentions} menciones`} />
-            <Card label="Citation Rate" value={`${l.citationRate}%`} hint={`${l.citations} citas`} />
+            <Card label="Citation Rate" value={`${l.citationRate}%`} hint={`${l.citations}/${l.citationEligibleResponses} respuestas elegibles`} />
             <Card
-              label="Posición media"
+              label="Orden medio de mención"
               value={l.averagePosition == null ? "—" : `${l.averagePosition}`}
-              hint="rango al aparecer"
+              hint="primera aparición al mencionarse"
             />
             <Card
               label="Sentimiento de marca"
@@ -192,6 +198,12 @@ export default function Dashboard() {
           </div>
 
           <h2>Evolución</h2>
+          {!historyComparable && data!.history.length > 1 && (
+            <div className="toast err" style={{ marginBottom: 12 }}>
+              Serie orientativa: incluye runs legacy o paneles diferentes. Compara únicamente
+              ejecuciones con el mismo fingerprint.
+            </div>
+          )}
           <div className="panel">
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={data!.history.map(fmtHistory)}>

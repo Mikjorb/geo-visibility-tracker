@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query, queryOne } from "@/lib/db";
+import { withTransaction } from "@/lib/db";
 import { suggestPrompts, AuditInput } from "@/lib/suggest-prompts";
 
 export const runtime = "nodejs";
@@ -36,24 +36,19 @@ export async function POST(req: NextRequest) {
 
   // Si se pide reemplazar, desactivamos el set anterior (no se borra: se conserva
   // el histórico de runs que lo referencian).
-  if (body.replaceActive) {
-    await query("UPDATE prompts SET active = FALSE WHERE active = TRUE");
-  }
-
   const created: { id: number; text: string; query_type: string; brand_focus: string }[] = [];
-  for (const p of generated) {
-    const row = await queryOne<{ id: number }>(
-      `INSERT INTO prompts (text, market, language, query_type, brand_focus)
-       VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [p.text, p.market, p.language, p.query_type, p.brand_focus]
-    );
-    created.push({
-      id: row!.id,
-      text: p.text,
-      query_type: p.query_type,
-      brand_focus: p.brand_focus,
-    });
-  }
+  await withTransaction(async (client) => {
+    if (body.replaceActive)
+      await client.query("UPDATE prompts SET active = FALSE WHERE active = TRUE");
+    for (const p of generated) {
+      const result = await client.query<{ id: number }>(
+        `INSERT INTO prompts (text, market, language, query_type, brand_focus)
+         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [p.text, p.market, p.language, p.query_type, p.brand_focus]
+      );
+      created.push({ id: result.rows[0].id, text: p.text, query_type: p.query_type, brand_focus: p.brand_focus });
+    }
+  });
 
   return NextResponse.json({ created: created.length, replacedActive: !!body.replaceActive, prompts: created });
 }

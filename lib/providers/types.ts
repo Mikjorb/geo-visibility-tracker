@@ -9,10 +9,18 @@ export interface AskParams {
 
 export interface AskResult {
   text: string;
-  // Citas/URLs (fuentes) si el proveedor las expone (Perplexity, Gemini grounding).
-  citations?: string[];
+  // Citas normalizadas. `url` es la fuente final cuando el proveedor la
+  // expone; `providerUrl` conserva redirects/opacos del proveedor (Gemini).
+  citations?: ProviderCitation[];
   // Fan-out: sub-búsquedas que el modelo lanzó internamente. Solo Gemini las da.
   fanoutQueries?: string[];
+}
+
+export interface ProviderCitation {
+  url?: string;
+  domain?: string;
+  title?: string;
+  providerUrl?: string;
 }
 
 export type Provider = (params: AskParams) => Promise<AskResult>;

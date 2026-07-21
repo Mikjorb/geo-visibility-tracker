@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { hasValidSession } from "@/lib/auth";
 
 // Puerta de acceso simple por contraseña. Si APP_PASSWORD no está definida
 // (entorno local), no se exige nada. /api/run queda exento porque lo protege
@@ -11,11 +12,7 @@ export function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const password = process.env.APP_PASSWORD;
-  if (!password) return NextResponse.next(); // sin contraseña configurada → abierto (dev)
-
-  const cookie = req.cookies.get("geotracker_auth")?.value;
-  if (cookie === password) return NextResponse.next();
+  if (hasValidSession(req)) return NextResponse.next();
 
   const url = req.nextUrl.clone();
   url.pathname = "/login";

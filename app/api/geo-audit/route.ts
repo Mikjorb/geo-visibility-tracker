@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query, queryOne } from "@/lib/db";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 
@@ -36,7 +37,23 @@ export async function GET(req: NextRequest) {
 
 // Guarda el resultado de una auditoría GEO ya realizada.
 export async function POST(req: NextRequest) {
-  const body = await req.json();
+  const scoreMap = z.record(z.string(), z.number().min(0).max(100));
+  const schema = z.object({
+    domain: z.string().trim().min(1).max(253),
+    score: z.number().min(0).max(100),
+    dimensions: scoreMap.optional().default({}),
+    crawlerAccess: z.record(z.string(), z.string()).optional().default({}),
+    llmsTxtStatus: z.enum(["present", "missing", "malformed"]).nullable().optional().default(null),
+    platformScores: scoreMap.optional().default({}),
+    recommendations: z.array(z.record(z.string(), z.unknown())).max(100).optional().default([]),
+    notes: z.string().max(20000).nullable().optional().default(null),
+    auditorVersion: z.string().trim().min(1).max(120),
+    evidence: z.array(z.record(z.string(), z.unknown())).min(1).max(500),
+  });
+  const parsed = schema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success)
+    return NextResponse.json({ error: "Auditoría GEO inválida", issues: parsed.error.issues }, { status: 400 });
+  const body = parsed.data;
   const {
     domain,
     score,
@@ -46,19 +63,14 @@ export async function POST(req: NextRequest) {
     platformScores = {},
     recommendations = [],
     notes = null,
+    auditorVersion,
+    evidence,
   } = body;
-
-  if (!domain || typeof score !== "number") {
-    return NextResponse.json(
-      { error: "Se requieren 'domain' (string) y 'score' (número 0-100)." },
-      { status: 400 }
-    );
-  }
 
   const row = await queryOne<{ id: number }>(
     `INSERT INTO geo_audits
-      (domain, score, dimensions, crawler_access, llms_txt_status, platform_scores, recommendations, notes)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      (domain, score, dimensions, crawler_access, llms_txt_status, platform_scores, recommendations, notes, auditor_version, evidence)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING id`,
     [
       domain,
@@ -69,6 +81,8 @@ export async function POST(req: NextRequest) {
       JSON.stringify(platformScores),
       JSON.stringify(recommendations),
       notes,
+      auditorVersion,
+      JSON.stringify(evidence),
     ]
   );
 

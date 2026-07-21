@@ -1,5 +1,29 @@
 import { AskParams, AskResult, ProviderError, fetchJson } from "./types";
 
+export function parseGeminiResponse(data: any): AskResult {
+  const candidate = data.candidates?.[0] ?? {};
+  const parts = candidate.content?.parts ?? [];
+  const text: string = parts.map((p: any) => p.text ?? "").join("");
+  const grounding = candidate.groundingMetadata ?? {};
+  const citations = (grounding.groundingChunks ?? [])
+    .map((c: any) => {
+      const title = c.web?.title;
+      const providerUrl = c.web?.uri;
+      return title || providerUrl
+        ? {
+            // Gemini 2.5 suele exponer el dominio en title y un redirect opaco
+            // en uri. No inventamos una URL de página que el API no entregó.
+            domain: title,
+            title,
+            providerUrl,
+          }
+        : null;
+    })
+    .filter(Boolean);
+  const fanoutQueries: string[] = (grounding.webSearchQueries ?? []).filter(Boolean);
+  return { text: text.trim(), citations, fanoutQueries };
+}
+
 // Google Gemini (API generativelanguage). Con webSearch activa el grounding
 // con Google Search para que la respuesta use resultados reales de búsqueda.
 export async function ask({
@@ -24,21 +48,5 @@ export async function ask({
     }
   );
 
-  const parts = data.candidates?.[0]?.content?.parts ?? [];
-  const text: string = parts.map((p: any) => p.text ?? "").join("");
-
-  // Citas del grounding metadata. OJO: web.uri es un redirect de Vertex
-  // (vertexaisearch.cloud.google.com); el dominio real está en web.title.
-  const grounding = data.candidates?.[0]?.groundingMetadata ?? {};
-  const chunks = grounding.groundingChunks ?? [];
-  const citations: string[] = chunks
-    .map((c: any) => c.web?.title || c.web?.uri)
-    .filter(Boolean);
-
-  // Fan-out: las consultas que Gemini lanzó a Google Search para responder.
-  const fanoutQueries: string[] = (grounding.webSearchQueries ?? []).filter(
-    Boolean
-  );
-
-  return { text: text.trim(), citations, fanoutQueries };
+  return parseGeminiResponse(data);
 }

@@ -97,6 +97,13 @@ async function getVisibility(runId) {
     [runId]
   );
   const cites = Number(ownCites[0]?.n ?? 0);
+  const eligibleRows = await q(
+    `SELECT COUNT(*) n FROM responses resp JOIN models m ON m.id = resp.model_id
+     WHERE resp.run_id = $1 AND resp.error IS NULL
+       AND (m.web_search_enabled = TRUE OR m.provider = 'perplexity')`,
+    [runId]
+  );
+  const citationEligibleResponses = Number(eligibleRows[0]?.n ?? 0);
   const ownSentiments = rows
     .filter((r) => r.is_own && r.mentioned)
     .map((r) => r.sentiment);
@@ -104,7 +111,8 @@ async function getVisibility(runId) {
     runId,
     responses: total,
     mentionRate: total ? round1((hits / total) * 100) : 0,
-    citationRate: total ? round1((cites / total) * 100) : 0,
+    citationEligibleResponses,
+    citationRate: citationEligibleResponses ? round1((cites / citationEligibleResponses) * 100) : 0,
     aiVisibilityScore: total ? Math.round((vis / total) * 1000) : 0,
     averagePosition: ranks.length ? round1(ranks.reduce((a, b) => a + b, 0) / ranks.length) : null,
     sentiment: sentimentSummary(ownSentiments),
