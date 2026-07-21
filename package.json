@@ -8,7 +8,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:setup": "node scripts/db-setup.mjs",
     "mcp": "node mcp/server.mjs"
   },
@@ -18,13 +20,17 @@
     "pg": "^8.13.1",
     "react": "19.1.1",
     "react-dom": "19.1.1",
-    "recharts": "^2.15.0"
+    "recharts": "^2.15.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.10",
     "@types/react": "19.1.1",
     "@types/react-dom": "19.1.1",
-    "typescript": "^5.7.0"
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.2.10",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
   }
 }

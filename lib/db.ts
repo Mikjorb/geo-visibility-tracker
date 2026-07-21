@@ -1,10 +1,9 @@
-import { Pool } from "pg";
+import { Pool, PoolClient } from "pg";
 
 // Pool único reutilizado entre invocaciones.
 // Usa DATABASE_URL (Supabase u otro Postgres). SSL requerido por Postgres gestionado.
 declare global {
-  // eslint-disable-next-line no-var
-  var _llmTrackPool: Pool | undefined;
+  var _geoTrackerPool: Pool | undefined;
 }
 
 function createPool(): Pool {
@@ -27,8 +26,8 @@ function createPool(): Pool {
 // Inicialización perezosa: no se conecta al importar (para no romper el build
 // sin DATABASE_URL), solo en la primera consulta real.
 export function getPool(): Pool {
-  if (!global._llmTrackPool) global._llmTrackPool = createPool();
-  return global._llmTrackPool;
+  if (!global._geoTrackerPool) global._geoTrackerPool = createPool();
+  return global._geoTrackerPool;
 }
 
 export async function query<T = any>(
@@ -45,4 +44,21 @@ export async function queryOne<T = any>(
 ): Promise<T | null> {
   const rows = await query<T>(text, params);
   return rows[0] ?? null;
+}
+
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

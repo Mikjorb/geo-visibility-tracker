@@ -28,17 +28,17 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// 1ª posición de cualquiera de los términos, respetando límites de palabra
-// cuando el término es alfanumérico simple (evita falsos positivos).
+// 1ª posición de cualquiera de los términos. Los límites se aplican también a
+// aliases compuestos para evitar casos como "ACME 3DPLUS".
 function firstMatchPosition(haystack: string, terms: string[]): number | null {
   let best: number | null = null;
   for (const term of terms) {
     const t = normalize(term).trim();
     if (!t) continue;
-    const useWordBoundary = /^[a-z0-9]+$/.test(t);
-    const pattern = useWordBoundary
-      ? new RegExp(`\\b${escapeRegex(t)}\\b`)
-      : new RegExp(escapeRegex(t));
+    const pattern = new RegExp(
+      `(?<![a-z0-9])${escapeRegex(t)}(?![a-z0-9])`,
+      "u"
+    );
     const m = pattern.exec(haystack);
     if (m && (best === null || m.index < best)) best = m.index;
   }
@@ -71,7 +71,7 @@ export function detectMentions(rawText: string, brands: Brand[]): BrandMention[]
 // Extrae dominio (sin www) de una URL. Devuelve null si no es parseable.
 export function domainFromUrl(url: string): string | null {
   try {
-    const u = new URL(url.startsWith("http") ? url : `https://${url}`);
+    const u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
     return u.hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return null;
@@ -80,18 +80,43 @@ export function domainFromUrl(url: string): string | null {
 
 // Convierte la lista de citas (URLs) del proveedor en filas {domain,url,position,isOwn}.
 export function parseCitations(
-  citations: string[],
+  citations: Array<
+    | string
+    | { url?: string; domain?: string; title?: string; providerUrl?: string }
+  >,
   ownDomain: string | null
-): { domain: string; url: string; position: number; isOwn: boolean }[] {
-  const rows: { domain: string; url: string; position: number; isOwn: boolean }[] = [];
-  citations.forEach((url, i) => {
-    const domain = domainFromUrl(url);
+): {
+  domain: string;
+  url: string | null;
+  providerUrl: string | null;
+  title: string | null;
+  position: number;
+  isOwn: boolean;
+}[] {
+  const rows: ReturnType<typeof parseCitations> = [];
+  const seen = new Set<string>();
+  const normalizedOwn = ownDomain ? domainFromUrl(ownDomain) : null;
+  citations.forEach((citation) => {
+    const item = typeof citation === "string" ? { url: citation } : citation;
+    const domain = item.domain
+      ? domainFromUrl(item.domain)
+      : item.url
+        ? domainFromUrl(item.url)
+        : null;
     if (!domain) return;
+    const url = item.url ?? null;
+    const key = `${domain}|${url ?? ""}`;
+    if (seen.has(key)) return;
+    seen.add(key);
     rows.push({
       domain,
       url,
-      position: i + 1,
-      isOwn: ownDomain ? domain.includes(ownDomain.toLowerCase()) : false,
+      providerUrl: item.providerUrl ?? null,
+      title: item.title ?? null,
+      position: rows.length + 1,
+      isOwn: normalizedOwn
+        ? domain === normalizedOwn || domain.endsWith(`.${normalizedOwn}`)
+        : false,
     });
   });
   return rows;
@@ -167,6 +192,31 @@ export function averagePosition(allRows: MentionRow[]): number | null {
     .map((r) => r.rank as number);
   if (ranks.length === 0) return null;
   return round1(ranks.reduce((a, b) => a + b, 0) / ranks.length);
+}
+
+// Sentimiento de marca (percepción) — tarea LLM-as-judge: Claude puntúa 1-5
+// cómo se percibe la marca propia en cada respuesta que la menciona
+// (1 muy negativo … 5 muy positivo/líder). Aquí solo agregamos esos valores.
+// score 0-100 = (media-1)/4*100 (1→0, 3→50, 5→100). Reparto: pos 4-5, neutral 3, neg 1-2.
+// Devuelve score:null si no hay ninguna mención analizada (no mostrar 0% engañoso).
+export function sentimentSummary(sentiments: (number | null)[]): {
+  score: number | null;
+  positive: number;
+  neutral: number;
+  negative: number;
+  analyzed: number;
+} {
+  const vals = sentiments.filter((s): s is number => s != null);
+  if (vals.length === 0)
+    return { score: null, positive: 0, neutral: 0, negative: 0, analyzed: 0 };
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return {
+    score: Math.round(((avg - 1) / 4) * 100),
+    positive: vals.filter((s) => s >= 4).length,
+    neutral: vals.filter((s) => s === 3).length,
+    negative: vals.filter((s) => s <= 2).length,
+    analyzed: vals.length,
+  };
 }
 
 // AI Visibility Score (escala 0-1000) — fórmula propia y transparente:

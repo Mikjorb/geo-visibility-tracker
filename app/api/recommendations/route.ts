@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { query, withTransaction } from "@/lib/db";
 import { detectGaps, RunResponse } from "@/lib/recommendations";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,7 +34,7 @@ export async function GET() {
 // API), agregando TODO el histórico de ejecuciones, no solo la última. No
 // escribe nada en `recommendations` — devuelve el resumen para que Claude Code
 // lo lea en sesión y redacte/actualice las tareas él mismo.
-export async function POST(req: NextRequest) {
+export async function POST() {
   const ownRow = await query<{ name: string }>(
     "SELECT name FROM brands WHERE is_own = TRUE LIMIT 1"
   );
@@ -102,27 +103,43 @@ export async function POST(req: NextRequest) {
 // PUT: guarda una tanda de recomendaciones ya redactadas (por Claude Code en
 // sesión, a partir del resumen de huecos). Reemplaza las anteriores.
 export async function PUT(req: NextRequest) {
-  const { recommendations } = await req.json();
-  if (!Array.isArray(recommendations) || recommendations.length === 0) {
+  const parsed = z.object({
+    recommendations: z.array(z.object({
+      priority: z.number().int().min(1).max(3).default(2),
+      category: z.string().trim().min(1).max(60).default("general"),
+      title: z.string().trim().min(1).max(300),
+      action: z.string().trim().min(1).max(10000),
+      rationale: z.string().max(10000).default(""),
+    })).min(1).max(50),
+    generatorVersion: z.string().trim().min(1).max(120),
+    sourceContext: z.record(z.string(), z.unknown())
+      .refine((value) => Object.keys(value).length > 0, "sourceContext es obligatorio"),
+  }).safeParse(await req.json().catch(() => null));
+  if (!parsed.success)
     return NextResponse.json({ error: "recommendations vacío o inválido" }, { status: 400 });
-  }
+  const { recommendations, generatorVersion, sourceContext } = parsed.data;
 
-  await query("DELETE FROM recommendations");
-  for (const t of recommendations) {
-    await query(
-      `INSERT INTO recommendations (run_id, priority, category, title, action, rationale)
-       VALUES ((SELECT id FROM runs ORDER BY started_at DESC LIMIT 1), $1,$2,$3,$4,$5)`,
-      [t.priority ?? 2, t.category ?? "general", t.title, t.action, t.rationale ?? ""]
-    );
-  }
+  await withTransaction(async (client) => {
+    await client.query("DELETE FROM recommendations");
+    for (const t of recommendations) {
+      await client.query(
+      `INSERT INTO recommendations
+         (run_id, priority, category, title, action, rationale, generator_version, source_context)
+       VALUES ((SELECT id FROM runs ORDER BY started_at DESC LIMIT 1), $1,$2,$3,$4,$5,$6,$7)`,
+        [t.priority, t.category, t.title, t.action, t.rationale, generatorVersion, JSON.stringify(sourceContext)]
+      );
+    }
+  });
 
   return NextResponse.json({ saved: recommendations.length });
 }
 
 // PATCH: marca/desmarca una tarea como hecha.
 export async function PATCH(req: NextRequest) {
-  const { id, done } = await req.json();
-  if (typeof id !== "number") return NextResponse.json({ error: "id requerido" }, { status: 400 });
+  const parsed = z.object({ id: z.number().int().positive(), done: z.boolean() })
+    .safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "id/done requeridos" }, { status: 400 });
+  const { id, done } = parsed.data;
   await query("UPDATE recommendations SET done = $2 WHERE id = $1", [id, !!done]);
   return NextResponse.json({ ok: true });
 }

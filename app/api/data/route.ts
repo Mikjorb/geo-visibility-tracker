@@ -5,6 +5,7 @@ import {
   shareOfVoice,
   averagePosition,
   aiVisibilityScore,
+  sentimentSummary,
   round1,
   MentionRow,
 } from "@/lib/analyze";
@@ -29,10 +30,11 @@ export async function GET() {
     is_own: boolean;
     mentioned: boolean;
     rank: number | null;
+    sentiment: number | null;
   }>(
     `SELECT mt.response_id, m.label AS model_label,
             b.id AS brand_id, b.name AS brand_name, b.is_own,
-            mt.mentioned, mt.rank
+            mt.mentioned, mt.rank, mt.sentiment
      FROM mentions mt
      JOIN responses resp ON resp.id = mt.response_id
      JOIN models m ON m.id = resp.model_id
@@ -59,6 +61,14 @@ export async function GET() {
     [runId]
   );
   const totalResponses = byResponse.size;
+  const citationEligible = await query<{ n: string }>(
+    `SELECT COUNT(*) AS n
+     FROM responses resp JOIN models m ON m.id = resp.model_id
+     WHERE resp.run_id = $1 AND resp.error IS NULL
+       AND (m.web_search_enabled = TRUE OR m.provider = 'perplexity')`,
+    [runId]
+  );
+  const citationEligibleResponses = Number(citationEligible[0]?.n ?? 0);
   const ownCitationResponses = await query<{ n: string }>(
     `SELECT COUNT(DISTINCT resp.id) AS n
      FROM citations c JOIN responses resp ON resp.id = c.response_id
@@ -83,6 +93,12 @@ export async function GET() {
   const sov = shareOfVoice(allRows);
   const ownMentions = allRows.filter((r) => r.is_own && r.mentioned).length;
   const ownCites = Number(ownCitationResponses[0]?.n ?? 0);
+
+  // Sentimiento de la marca propia (solo menciones donde aparece). Los valores
+  // 1-5 los escribe Claude en sesión; aquí solo se agregan.
+  const ownMentionRows = rows.filter((r) => r.is_own && r.mentioned);
+  const sentiment = sentimentSummary(ownMentionRows.map((r) => r.sentiment));
+  const sentimentPending = ownMentionRows.filter((r) => r.sentiment == null).length;
 
   // Entidades de marca descubiertas por Claude en esta ejecución: cuántas
   // respuestas mencionan cada marca (canónica). Construye el "grafo" de marcas.
@@ -144,7 +160,12 @@ export async function GET() {
       aiVisibilityScore: aiVisibilityScore(rowsByResponse),
       averagePosition: averagePosition(allRows),
       citations: ownCites,
-      citationRate: totalResponses ? round1((ownCites / totalResponses) * 100) : 0,
+      citationEligibleResponses,
+      citationRate: citationEligibleResponses
+        ? round1((ownCites / citationEligibleResponses) * 100)
+        : 0,
+      sentiment,
+      sentimentPending,
       pendingAnalysis: Number(pending[0]?.n ?? 0),
       shareOfVoice: sov,
       topDomains,
@@ -160,14 +181,16 @@ async function buildHistory() {
   const rows = await query<{
     run_id: number;
     started_at: string;
+    panel_fingerprint: string | null;
     response_id: number;
     is_own: boolean;
     mentioned: boolean;
     rank: number | null;
     brand_name: string;
+    sentiment: number | null;
   }>(
-    `SELECT r.id AS run_id, r.started_at, mt.response_id,
-            b.is_own, mt.mentioned, mt.rank, b.name AS brand_name
+    `SELECT r.id AS run_id, r.started_at, r.panel_fingerprint, mt.response_id,
+            b.is_own, mt.mentioned, mt.rank, b.name AS brand_name, mt.sentiment
      FROM mentions mt
      JOIN responses resp ON resp.id = mt.response_id
      JOIN runs r ON r.id = resp.run_id
@@ -178,11 +201,11 @@ async function buildHistory() {
 
   const byRun = new Map<
     number,
-    { date: string; responses: Map<number, MentionRow[]> }
+    { date: string; panelFingerprint: string | null; responses: Map<number, MentionRow[]>; sentiments: (number | null)[] }
   >();
   for (const r of rows) {
     if (!byRun.has(r.run_id))
-      byRun.set(r.run_id, { date: r.started_at, responses: new Map() });
+      byRun.set(r.run_id, { date: r.started_at, panelFingerprint: r.panel_fingerprint, responses: new Map(), sentiments: [] });
     const run = byRun.get(r.run_id)!;
     if (!run.responses.has(r.response_id)) run.responses.set(r.response_id, []);
     run.responses.get(r.response_id)!.push({
@@ -192,6 +215,7 @@ async function buildHistory() {
       mentioned: r.mentioned,
       rank: r.rank,
     });
+    if (r.is_own && r.mentioned) run.sentiments.push(r.sentiment);
   }
 
   return [...byRun.entries()].map(([runId, v]) => {
@@ -199,8 +223,10 @@ async function buildHistory() {
     return {
       runId,
       date: v.date,
+      panelFingerprint: v.panelFingerprint,
       mentionRate: mentionRate(rbr),
       aiVisibilityScore: aiVisibilityScore(rbr),
+      sentimentScore: sentimentSummary(v.sentiments).score,
     };
   });
 }

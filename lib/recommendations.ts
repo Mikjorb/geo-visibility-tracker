@@ -33,7 +33,7 @@ export interface GapSummary {
 const REPUTATION_RE = /(opinion|opiniones|review|reviews|reputaci|valorac|experiencias|fiable|confiab|estafa|scam)/i;
 
 export function detectGaps(ownBrand: string, responses: RunResponse[]): GapSummary {
-  const ok = responses.filter((r) => true);
+  const ok = responses;
   const total = ok.length;
 
   const promptsWithoutMention = [

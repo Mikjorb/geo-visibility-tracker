@@ -1,5 +1,13 @@
 import { AskParams, AskResult, ProviderError, fetchJson } from "./types";
 
+export function parsePerplexityResponse(data: any): AskResult {
+  const text: string = data.choices?.[0]?.message?.content ?? "";
+  const citations = Array.isArray(data.citations)
+    ? data.citations.filter(Boolean).map((url: string) => ({ url }))
+    : [];
+  return { text: text.trim(), citations };
+}
+
 // Perplexity (API compatible con chat completions). Siempre busca en web,
 // por eso es el modelo más fiel para GEO y el que mejor expone citas.
 export async function ask({
@@ -21,7 +29,5 @@ export async function ask({
     }),
   });
 
-  const text: string = data.choices?.[0]?.message?.content ?? "";
-  const citations: string[] = data.citations ?? [];
-  return { text: text.trim(), citations };
+  return parsePerplexityResponse(data);
 }
