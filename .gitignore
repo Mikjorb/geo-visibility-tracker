@@ -11,6 +11,7 @@
 # misc
 .DS_Store
 *.pem
+.claude/
 
 # env files (¡nunca commitear las claves!)
 .env
